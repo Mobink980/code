@@ -75,6 +75,16 @@ class InterfaceUnit : public ClockedObject, public Consumer
     void addOutPort(GridLink *out_link, AffirmLink *credit_link,
         SwitchID router_id, uint32_t consumerVcs);
 
+    //====================================================
+    //====================================================
+    //add a bus-specific inport to the NI
+    void addNetworkInport(GridLink *in_link, AffirmLink *credit_link);
+    //add a bus-specific outport to the NI
+    void addNetworkOutport(GridLink *out_link, AffirmLink *credit_link,
+        SwitchID bus_id, uint32_t consumerVcs);
+    //=====================================================
+    //=====================================================
+
     //for enqueuing a stalled message into the MessageBuffer
     //in the next cycle, after a message was dequeued this cycle
     void dequeueCallback();
@@ -97,8 +107,15 @@ class InterfaceUnit : public ClockedObject, public Consumer
     //with the data from the packet
     uint32_t functionalWrite(Packet *);
 
-    //schedule a fragment to be sent from an NI output port
-    void scheduleFlit(fragment *t_fragment);
+    //schedule a flit to be sent from an NI output port to router
+    void scheduleFlit(fragment *t_flit);
+
+    //===================================================
+    //===================================================
+    //schedule a flit to be sent from an NI output port to bus
+    void scheduleBusFlit(fragment *t_flit);
+    //===================================================
+    //===================================================
 
     //get the id of the router connected to the NI with an outport
     //each port has a specific vnet number
@@ -112,25 +129,41 @@ class InterfaceUnit : public ClockedObject, public Consumer
         return oPort->routerID();
     }
 
+    //=================================================================
+    //=================================================================
+    //get the id of the bus connected to the NI with a network outport
+    //each port has a specific vnet number
+    int get_bus_id(int vnet)
+    {
+        //get the outport for the given vnet
+        NetworkOutport *ni_outport = getNetworkOutportForVnet(vnet);
+        //make sure the outport exists
+        assert(ni_outport);
+        //return the bus id of that outport
+        return ni_outport->busID();
+    }
+    //=================================================================
+    //=================================================================
+
     //class OutputPort is a member of the InterfaceUnit class
     class OutputPort
     {
       public:
           //OutputPort constructor 
-          //We need a GridLink, a AffirmLink, and a router id to
+          //We need a NetworkLink, a CreditLink, and a router id to
           //instantiate an NI outport
           OutputPort(GridLink *outLink, AffirmLink *creditLink,
               int routerID)
           {
               //outport vnet
               _vnets = outLink->mVnets;
-              //the fragmentBuffer for sending out fragments to the network
+              //the flitBuffer for sending out flits to the network
               _outFlitQueue = new fragmentBuffer();
 
               //set the network link going out of the outport
               _outNetLink = outLink;
               //set the credit link coming into the outport
-              _inAffirmLink = creditLink;
+              _inCreditLink = creditLink;
 
               //set the id of the router connected to this NI
               _routerID = routerID;
@@ -141,7 +174,7 @@ class InterfaceUnit : public ClockedObject, public Consumer
 
           }
 
-          //get the fragmentBuffer for sending out fragments to the network
+          //get the flitBuffer for sending out flits to the network
           fragmentBuffer *
           outFlitQueue()
           {
@@ -157,9 +190,9 @@ class InterfaceUnit : public ClockedObject, public Consumer
 
           //get the credit link coming into the outport
           AffirmLink *
-          inAffirmLink()
+          inCreditLink()
           {
-              return _inAffirmLink;
+              return _inCreditLink;
           }
 
           //get the id of the router connected to the NI
@@ -219,13 +252,13 @@ class InterfaceUnit : public ClockedObject, public Consumer
       private:
           //vnets vector
           std::vector<int> _vnets;
-          //for sending out fragments to the network
+          //for sending out flits to the network
           fragmentBuffer *_outFlitQueue;
 
           //network link going out of the outport
           GridLink *_outNetLink;
           //credit link coming into the outport
-          AffirmLink *_inAffirmLink;
+          AffirmLink *_inCreditLink;
 
           int _vcRoundRobin; // For round robin scheduling
 
@@ -238,28 +271,28 @@ class InterfaceUnit : public ClockedObject, public Consumer
     {
       public:
           //InputPort constructor
-          //We need a GridLink, and a AffirmLink to instantiate
+          //We need a NetworkLink, and a CreditLink to instantiate
           //an NI inport
           InputPort(GridLink *inLink, AffirmLink *creditLink)
           {
               //inport vnets
               _vnets = inLink->mVnets;
-              //set the fragmentBuffer for sending credit fragments to the network
-              _outAffirmQueue = new fragmentBuffer();
+              //set the flitBuffer for sending credit flits to the network
+              _outCreditQueue = new fragmentBuffer();
 
               //set the network link coming into the inport
               _inNetLink = inLink;
               //set the credit link going out of the inport
-              _outAffirmLink = creditLink;
+              _outCreditLink = creditLink;
               //set the inport link bitWidth (from network link)
               _bitWidth = inLink->bitWidth;
           }
 
-          //get the fragmentBuffer for sending credit fragments to the network
+          //get the flitBuffer for sending credit flits to the network
           fragmentBuffer *
-          outAffirmQueue()
+          outCreditQueue()
           {
-              return _outAffirmQueue;
+              return _outCreditQueue;
           }
 
           //get the network link coming into the inport
@@ -271,9 +304,9 @@ class InterfaceUnit : public ClockedObject, public Consumer
 
           //get the credit link going out of the inport
           AffirmLink *
-          outAffirmLink()
+          outCreditLink()
           {
-              return _outAffirmLink;
+              return _outCreditLink;
           }
 
           //check whether vnet is supported
@@ -292,11 +325,11 @@ class InterfaceUnit : public ClockedObject, public Consumer
 
           }
 
-          //for sending credit fragments to the network
-          void sendAffirm(Affirm *cFlit)
+          //for sending credit flits to the network
+          void sendCredit(Affirm *cFlit)
           {
-              //insert the given fragment into _outAffirmQueue fragmentBuffer
-              _outAffirmQueue->insert(cFlit);
+              //insert the given fragment into _outCreditQueue fragmentBuffer
+              _outCreditQueue->insert(cFlit);
           }
 
           //get the inport links bitWidth
@@ -324,16 +357,242 @@ class InterfaceUnit : public ClockedObject, public Consumer
       private:
           //inport vnets
           std::vector<int> _vnets;
-          //the fragmentBuffer for sending credit fragments to the network
-          fragmentBuffer *_outAffirmQueue;
-
+          //the flitBuffer for sending credit flits to the network
+          fragmentBuffer *_outCreditQueue;
           //the network link coming into the inport
           GridLink *_inNetLink;
           //the credit link going out of the inport
-          AffirmLink *_outAffirmLink;
+          AffirmLink *_outCreditLink;
           //bitWidth of the inport links
           uint32_t _bitWidth;
     };
+
+//=============================================================================
+//=============================================================================
+    //class NetworkOutport is a member of the NetworkInterface class
+    class NetworkOutport
+    {
+      public:
+          //NetworkOutport constructor
+          //We need a NetworkLink, a CreditLink, and a bus id to
+          //instantiate an NI outport
+          NetworkOutport(GridLink *outLink, AffirmLink *creditLink,
+              int busID)
+          {
+              //outport vnet
+              _vnets = outLink->mVnets;
+              //the flitBuffer for sending out flits to the network
+              _outFlitQueue = new fragmentBuffer();
+
+              //set the network link going out of the outport
+              _outNetLink = outLink;
+              //set the credit link coming into the outport
+              _inCreditLink = creditLink;
+
+              //set the id of the bus connected to this NI
+              _busID = busID;
+              //set the outport link bitWidth (from network link)
+              _bitWidth = outLink->bitWidth;
+              //set the VC round-robin to zero
+              _vcRoundRobin = 0;
+
+          }
+
+          //get the flitBuffer for sending out flits to the network
+          fragmentBuffer *
+          outFlitQueue()
+          {
+              return _outFlitQueue;
+          }
+
+          //get the network link going out of the outport
+          GridLink *
+          outNetLink()
+          {
+              return _outNetLink;
+          }
+
+          //get the credit link coming into the outport
+          AffirmLink *
+          inCreditLink()
+          {
+              return _inCreditLink;
+          }
+
+          //get the id of the bus connected to the NI
+          int
+          busID()
+          {
+              return _busID;
+          }
+
+          //get the outport links bitWidth
+          uint32_t bitWidth()
+          {
+              return _bitWidth;
+          }
+
+          //check whether vnet is supported
+          bool isVnetSupported(int pVnet)
+          {
+              if (!_vnets.size()) {
+                  return true;
+              }
+
+              for (auto &it : _vnets) {
+                  if (it == pVnet) {
+                      return true;
+                  }
+              }
+              return false;
+
+          }
+
+          //for printing the outport vnets
+          std::string
+          printVnets()
+          {
+              std::stringstream ss;
+              for (auto &it : _vnets) {
+                  ss << it;
+                  ss << " ";
+              }
+              return ss.str();
+          }
+
+          //get the vc round-robin has selected
+          int vcRoundRobin()
+          {
+              return _vcRoundRobin;
+          }
+
+          //set the vc for round-robin
+          void vcRoundRobin(int vc)
+          {
+              _vcRoundRobin = vc;
+          }
+
+
+      private:
+          //vnets vector
+          std::vector<int> _vnets;
+          //for sending out flits to the network
+          fragmentBuffer *_outFlitQueue;
+          //network link going out of the outport
+          GridLink *_outNetLink;
+          //credit link coming into the outport
+          AffirmLink *_inCreditLink;
+          // For round robin scheduling
+          int _vcRoundRobin; 
+          //id of the bus connected to the NI
+          int _busID; 
+          //bitWidth of the outport links
+          uint32_t _bitWidth; 
+    };
+
+
+    //class NetworkInport is a member of the NetworkInterface class
+    class NetworkInport
+    {
+      public:
+          //NetworkInport constructor
+          //We need a NetworkLink, and a CreditLink to instantiate
+          //an NI inport
+          NetworkInport(GridLink *inLink, AffirmLink *creditLink)
+          {
+              //inport vnets
+              _vnets = inLink->mVnets;
+              //set the flitBuffer for sending credit flits to the network
+              _outCreditQueue = new fragmentBuffer();
+
+              //set the network link coming into the inport
+              _inNetLink = inLink;
+              //set the credit link going out of the inport
+              _outCreditLink = creditLink;
+              //set the inport link bitWidth (from network link)
+              _bitWidth = inLink->bitWidth;
+          }
+
+          //get the flitBuffer for sending credit flits to the network
+          fragmentBuffer *
+          outCreditQueue()
+          {
+              return _outCreditQueue;
+          }
+
+          //get the network link coming into the inport
+          GridLink *
+          inNetLink()
+          {
+              return _inNetLink;
+          }
+
+          //get the credit link going out of the inport
+          AffirmLink *
+          outCreditLink()
+          {
+              return _outCreditLink;
+          }
+
+          //check whether vnet is supported
+          bool isVnetSupported(int pVnet)
+          {
+              if (!_vnets.size()) {
+                  return true;
+              }
+
+              for (auto &it : _vnets) {
+                  if (it == pVnet) {
+                      return true;
+                  }
+              }
+              return false;
+
+          }
+
+          //for sending credit flits to the network
+          void sendCredit(Affirm *cFlit)
+          {
+              //insert the given flit into _outCreditQueue flitBuffer
+              _outCreditQueue->insert(cFlit);
+          }
+
+          //get the inport links bitWidth
+          uint32_t bitWidth()
+          {
+              return _bitWidth;
+          }
+
+          //for printing inport vnets
+          std::string
+          printVnets()
+          {
+              std::stringstream ss;
+              for (auto &it : _vnets) {
+                  ss << it;
+                  ss << " ";
+              }
+              return ss.str();
+          }
+
+          // Queue for stalled flits
+          std::deque<fragment *> m_stall_queue;
+          //check to see if the message enqueued in this cycle
+          bool messageEnqueuedThisCycle;
+      private:
+          //inport vnets
+          std::vector<int> _vnets;
+          //the flitBuffer for sending credit flits to the network
+          fragmentBuffer *_outCreditQueue;
+          //the network link coming into the inport
+          GridLink *_inNetLink;
+          //the credit link going out of the inport
+          AffirmLink *_outCreditLink;
+          //bitWidth of the inport links
+          uint32_t _bitWidth;
+    };
+//=============================================================================
+//=============================================================================
 
 
   private:
@@ -341,28 +600,61 @@ class InterfaceUnit : public ClockedObject, public Consumer
     EmeraldNetwork *m_net_ptr;
     //id of the NI or node (num_NIs = num_cores)
     const NodeID m_id;
-    //number of VCs
+    //number of virtual networks
     const int m_virtual_networks;
     //number of VCs per Vnet
     int m_vc_per_vnet;
     //vc allocators
     std::vector<int> m_vc_allocator;
+    //================================================
+    //================================================
+    //bus vc allocators
+    std::vector<int> m_bus_vc_allocator;
+    //================================================
+    //================================================
     //InterfaceUnit outports
     std::vector<OutputPort *> outPorts;
     //InterfaceUnit inports
     std::vector<InputPort *> inPorts;
+    //===============================================
+    //===============================================
+    //NetworkInterface outports
+    std::vector<NetworkOutport *> ni_outports;
+    //NetworkInterface inports
+    std::vector<NetworkInport *> ni_inports;
+    //===============================================
+    //===============================================
     //to check for possible network deadlock in a vnet
     int m_deadlock_threshold;
-    //for knowing the states of the VCs
-    std::vector<VcStatus> outVcState;
-
-    //number of stalls
+    //number of stalls for every vnet
     std::vector<int> m_stall_count;
+    //==============================================
+    //==============================================
+    //number of stalls for every vnet for bus
+    std::vector<int> m_stall_count_bus;
+    //==============================================
+    //==============================================
 
     // Input Flit Buffers
     // The fragment buffers which will serve the Consumer
     std::vector<fragmentBuffer>  niOutVcs;
+    //holds the enqueue time for vcs in the niOutVcs
     std::vector<Tick> m_ni_out_vcs_enqueue_time;
+    //for knowing the states of the VCs
+    std::vector<VcStatus> outVcState;
+    //====================================================================
+    //====================================================================
+    //just like niOutVcs but the flits will go to NetworkOutport (Bus) 
+    //instead of the OutputPort (router)
+    std::vector<fragmentBuffer>  toBusVcs;
+    //holds the enqueue time for vcs in the toBusVcs
+    std::vector<Tick> m_to_bus_vcs_enqueue_time;
+    //for knowing the states of the VCs going to Bus
+    std::vector<VcStatus> toBusVcState;
+    //all the packets that come from NetworkInport and can't proceed stay here
+    std::vector<fragmentBuffer> congested_packets;
+    //====================================================================
+    //====================================================================
 
     // The Message buffers that takes messages from the protocol
     //from the coherence protocol controller
@@ -372,6 +664,12 @@ class InterfaceUnit : public ClockedObject, public Consumer
     std::vector<MessageBuffer *> outNode_ptr;
     // When a vc stays busy for a long time, it indicates a deadlock
     std::vector<int> vc_busy_counter;
+    //================================================================
+    //================================================================
+    // When a bus vc stays busy for a long time, it indicates a deadlock
+    std::vector<int> bus_vc_busy_counter;
+    //================================================================
+    //================================================================
 
     //checking the stall queue to reschedule stalled fragments
     void checkStallQueue();
@@ -381,22 +679,50 @@ class InterfaceUnit : public ClockedObject, public Consumer
     bool flitisizeMessage(MsgPtr msg_ptr, int vnet);
     //Looking for a free output vc
     int calculateVC(int vnet);
+    //=========================================
+    //=========================================
+    //Looking for a free output vc in Bus
+    int calculateBusVC(int vnet);
+    //=========================================
+    //=========================================
 
     //choose a vc from the outport in a round-robin manner
     void scheduleOutputPort(OutputPort *oPort);
     //schedule the outport link wakeup
     void scheduleOutputLink();
+
+    //=========================================
+    //=========================================
+    //choose a vc from NetworkOutport in a round-robin manner
+    void scheduleBusOutport(NetworkOutport *oPort);
+    //schedule the bus outport link wakeup
+    void scheduleBusOutputLink();
+    //Find the layer of a router based on its id
+    int get_destination_layer(int router_id);
+    //=========================================
+    //=========================================
+
     //Wakeup the NI in the next cycle to consume msgs or fragments, 
     //or when there's a clock period difference (to consume link fragments)
     void checkReschedule();
-
     //incremet the stats within the fragment
     void incrementStats(fragment *t_fragment);
-
     //get the inport for the given vnet
     InputPort *getInportForVnet(int vnet);
     //get the outport for the given vnet
     OutputPort *getOutportForVnet(int vnet);
+
+    //===================================================
+    //===================================================
+    //get a bus-specific inport for the given vnet
+    NetworkInport *getNetworkInportForVnet(int vnet);
+    //get a bus-specific outport for the given vnet
+    NetworkOutport *getNetworkOutportForVnet(int vnet);
+    //incremet the stats within the flit 
+    //when came from bus and not going to be ejected
+    void incrementStatsSpecial(fragment *t_flit);
+    //===================================================
+    //===================================================
 };
 
 } // namespace emerald
