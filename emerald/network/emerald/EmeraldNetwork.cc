@@ -69,12 +69,8 @@ namespace emerald
  */
 
 // EmeraldNetwork class constructor
-// EmeraldNetwork::EmeraldNetwork(const Params &p)
-//     : Network(p)
-//========================================================
 EmeraldNetwork::EmeraldNetwork(const Params &p)
     : Network(p)
-//========================================================
 {
     m_num_rows = p.num_rows; // number of rows
     m_num_cols = p.num_columns; // number of columns
@@ -147,10 +143,8 @@ void
 EmeraldNetwork::init()
 {
     // call the init function of the Network class
-    // Network::init();
-    //=====================
     Network::init();
-    //=====================
+    
     // for every node in the network, set the m_toNetQueues and
     // m_fromNetQueues for the NI
     for (int i=0; i < m_nodes; i++) {
@@ -181,7 +175,7 @@ EmeraldNetwork::init()
         else
         { // we have a 3D NoC
             m_num_cols = getNumCols();
-            //we check this in the config file
+            //we check this in the config file (commented to use additional routers)
             // assert(m_num_rows * m_num_cols * m_num_layers == m_routers.size());
         }
     }
@@ -233,7 +227,7 @@ EmeraldNetwork::makeExtInLink(NodeID global_src, SwitchID dest, BasicLink* link,
     // make sure the local_id is less than the total number of nodes
     assert(local_src < m_nodes);
 
-    // create a emerald external link
+    // create an emerald external link
     EmeraldExtLink* emerald_link = safe_cast<EmeraldExtLink*>(link);
 
     // EmeraldExtLink is bi-directional (EXT_IN_ means from NI to Router)
@@ -317,7 +311,7 @@ EmeraldNetwork::makeExtOutLink(SwitchID src, NodeID global_dest,
     // make sure we have a router object for the id, and not a NULL
     assert(m_routers[src] != NULL);
 
-    // create a emerald external link
+    // create an emerald external link
     EmeraldExtLink* emerald_link = safe_cast<EmeraldExtLink*>(link);
 
     // EmeraldExtLink is bi-directional (EXT_OUT_ means from Router to NI)
@@ -396,7 +390,72 @@ void
 EmeraldNetwork::makeBusInLink(NodeID global_src, SwitchID dest, BasicLink* link,
                              std::vector<NetDest>& routing_table_entry)
 {
+    // get the local_id of the Node (or NI)
+    // local_id may be equal with global_id if we only have one network
+    NodeID local_src = getLocalNodeID(global_src);
+    // make sure the local_id is less than the total number of nodes
+    assert(local_src < m_nodes);
 
+    // create an emerald bus link
+    EmeraldBusLink* emerald_link = safe_cast<EmeraldBusLink*>(link);
+
+    // EmeraldBusLink is bi-directional (BUS_IN_ means from NI to Bus)
+    GridLink* net_link = emerald_link->m_network_links[LinkDirection_In];
+    net_link->setType(BUS_IN_); // set the type of the network link to BUS_IN_
+    AffirmLink* credit_link = emerald_link->m_credit_links[LinkDirection_In];
+
+    m_networklinks.push_back(net_link); // add net_link to network links
+    m_creditlinks.push_back(credit_link); // add credit_link to credit links
+
+    // destination inport direction: means the dest of the link is bus
+    PortDirection dst_inport_dirn = "Local";
+
+    // set the maximum number of VCs per Vnet
+    m_max_vcs_per_vnet = std::max(m_max_vcs_per_vnet,
+                             m_busses[dest]->get_vc_per_vnet());
+
+    /*
+     * We check if a bridge was enabled at any end of the link.
+     * The bridge is enabled if either of clock domain
+     * crossing (CDC) or Serializer-Deserializer(SerDes) unit is
+     * enabled for the link at each end. The bridge encapsulates
+     * the functionality for both CDC and SerDes and is a Consumer
+     * object similiar to a NetworkLink.
+     *
+     * If a bridge was enabled we connect the NI and Routers to
+     * bridge before connecting the link. Example, if an external
+     * bridge is enabled, we would connect:
+     * NI--->NetworkBridge--->EmeraldExtLink---->Router
+     */
+
+    // add an outport at the side of the NI (for the EmeraldBusLink)
+    if (emerald_link->extBridgeEn) {
+        DPRINTF(RubyNetwork, "Enable external bridge for %s\n",
+            emerald_link->name());
+        GridOverpass *n_bridge = emerald_link->extNetBridge[LinkDirection_In];
+        m_nis[local_src]->
+        addNetworkOutport(n_bridge,
+                          emerald_link->extCredBridge[LinkDirection_In],
+                          dest, m_busses[dest]->get_vc_per_vnet());
+        m_networkbridges.push_back(n_bridge);
+    } else {
+        // without NetworkBridge
+        m_nis[local_src]->addNetworkOutport(net_link, credit_link, dest,
+                        m_busses[dest]->get_vc_per_vnet());
+    }
+
+    // add an inport at the side of the bus (for the EmeraldBusLink)
+    if (emerald_link->intBridgeEn) {
+        DPRINTF(RubyNetwork, "Enable internal bridge for %s\n",
+            emerald_link->name());
+        GridOverpass *n_bridge = emerald_link->intNetBridge[LinkDirection_In];
+        m_busses[dest]->addInPort(dst_inport_dirn, n_bridge,   
+                             emerald_link->intCredBridge[LinkDirection_In]);
+        m_networkbridges.push_back(n_bridge);
+    } else {
+        // without NetworkBridge
+        m_busses[dest]->addInPort(dst_inport_dirn, net_link, credit_link);
+    }
 }
 
 /*
@@ -409,7 +468,80 @@ EmeraldNetwork::makeBusOutLink(SwitchID src, NodeID global_dest,
                               BasicLink* link,
                               std::vector<NetDest>& routing_table_entry)
 {
+    // get the local_id of the node (or NI)
+    NodeID local_dest = getLocalNodeID(global_dest);
+    // make sure the local_id is less than the total number of nodes
+    assert(local_dest < m_nodes);
+    // id of the bus must be less than total number of busses
+    assert(src < m_busses.size());
+    // make sure we have a router object for the id, and not a NULL
+    assert(m_busses[src] != NULL);
 
+    // create an emerald bus link
+    EmeraldBusLink* emerald_link = safe_cast<EmeraldBusLink*>(link);
+
+    // EmeraldBusLink is bi-directional (BUS_OUT_ means from Bus to NI)
+    GridLink* net_link = emerald_link->m_network_links[LinkDirection_Out];
+    net_link->setType(BUS_OUT_); // set the type of the network link to BUS_OUT_
+    AffirmLink* credit_link = emerald_link->m_credit_links[LinkDirection_Out];
+
+    m_networklinks.push_back(net_link); // add net_link to network links
+    m_creditlinks.push_back(credit_link); // add credit_link to credit links
+
+    // source outport direction: means the src of the link is router
+    PortDirection src_outport_dirn = "Local";
+
+    // set the maximum number of VCs per Vnet
+    m_max_vcs_per_vnet = std::max(m_max_vcs_per_vnet,
+                             m_busses[src]->get_vc_per_vnet());
+
+    /*
+     * We check if a bridge was enabled at any end of the link.
+     * The bridge is enabled if either of clock domain
+     * crossing (CDC) or Serializer-Deserializer(SerDes) unit is
+     * enabled for the link at each end. The bridge encapsulates
+     * the functionality for both CDC and SerDes and is a Consumer
+     * object similiar to a NetworkLink.
+     *
+     * If a bridge was enabled we connect the NI and Routers to
+     * bridge before connecting the link. Example, if an external
+     * bridge is enabled, we would connect:
+     * NI<---NetworkBridge<---EmeraldExtLink<----Router
+     */
+
+    // add an inport at the side of the NI (for the EmeraldBusLink)
+    if (emerald_link->extBridgeEn) {
+        DPRINTF(RubyNetwork, "Enable external bridge for %s\n",
+            emerald_link->name());
+        GridOverpass *n_bridge = emerald_link->extNetBridge[LinkDirection_Out];
+        m_nis[local_dest]->
+            addNetworkInport(n_bridge, emerald_link->extCredBridge[LinkDirection_Out]);
+        m_networkbridges.push_back(n_bridge);
+    } else {
+        // without NetworkBridge
+        m_nis[local_dest]->addNetworkInport(net_link, credit_link);
+    }
+
+    // add an outport at the side of the bus (for the EmeraldBusLink)
+    if (emerald_link->intBridgeEn) {
+        DPRINTF(RubyNetwork, "Enable internal bridge for %s\n",
+            emerald_link->name());
+        GridOverpass *n_bridge = emerald_link->intNetBridge[LinkDirection_Out];
+        m_busses[src]->
+            addOutPort(src_outport_dirn,
+                       n_bridge,
+                       routing_table_entry, link->m_weight,
+                       emerald_link->intCredBridge[LinkDirection_Out],
+                       m_busses[src]->get_vc_per_vnet());
+        m_networkbridges.push_back(n_bridge);
+    } else {
+        // without NetworkBridge
+        m_busses[src]->
+            addOutPort(src_outport_dirn, net_link,
+                       routing_table_entry,
+                       link->m_weight, credit_link,
+                       m_busses[src]->get_vc_per_vnet());
+    }
 }
 //=====================================================================
 //=====================================================================
@@ -424,7 +556,7 @@ EmeraldNetwork::makeInternalLink(SwitchID src, SwitchID dest, BasicLink* link,
                                 PortDirection src_outport_dirn,
                                 PortDirection dst_inport_dirn)
 {
-    // create a emerald internal link
+    // create an emerald internal link
     EmeraldIntLink* emerald_link = safe_cast<EmeraldIntLink*>(link);
 
     // EmeraldIntLink is unidirectional (INT_ means from router to router)
@@ -506,14 +638,26 @@ EmeraldNetwork::get_router_id(int global_ni, int vnet)
     return m_nis[local_ni]->get_router_id(vnet);
 }
 
-//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+//===========================================================
+//===========================================================
+// Get ID of bus connected to a NI.
+int
+OnyxNetwork::get_bus_id(int global_ni, int vnet)
+{
+    // get the local_id of the NI that has global_ni global_id
+    NodeID local_ni = getLocalNodeID(global_ni);
+    // return the router_id of the router connected to this NI
+    // for the given vnet
+    return m_nis[local_ni]->get_bus_id(vnet);
+}
 // Total busses in the network
 int
-EmeraldNetwork::getNumBusses()
+OnyxNetwork::getNumBusses()
 {
     return m_busses.size();
 }
-//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+//===========================================================
+//===========================================================
 
 
 // for registering the EmeraldNetwork stats
@@ -521,10 +665,7 @@ void
 EmeraldNetwork::regStats()
 {
     // call the regStats() function from the parent class
-    // Network::regStats();
-    //=====================
     Network::regStats();
-    //=====================
 
     // Packets
     m_packets_received
@@ -714,8 +855,10 @@ EmeraldNetwork::collateStats()
     int total_extlink_activity = 0;
     int total_intlink_activity = 0;
     //============================================
+    //============================================
     int bus_links_count = 0;
     int total_buslink_activity = 0;
+    //============================================
     //============================================
     // for every network link
     for (int i = 0; i < m_networklinks.size(); i++) {
@@ -733,6 +876,20 @@ EmeraldNetwork::collateStats()
             total_extlink_activity += activity;
             ext_links_count++;
         }
+        //======================================================
+        //======================================================
+        else if (type == BUS_IN_) {
+            m_total_bus_in_link_utilization += activity;
+            total_buslink_activity += activity;
+            bus_links_count++;
+        }
+        else if (type == BUS_OUT_) {
+            m_total_bus_out_link_utilization += activity;
+            total_buslink_activity += activity;
+            bus_links_count++;
+        }
+        //======================================================
+        //======================================================
         else if (type == INT_) {
             m_total_int_link_utilization += activity;
             total_intlink_activity += activity;
@@ -756,7 +913,7 @@ EmeraldNetwork::collateStats()
     //Average utilization of an internal link
     m_average_int_link_utilization = total_intlink_activity/int_links_count;
     //====================================================================
-    //Average utilization of an internal link
+    //Average utilization of a bus link
     if (bus_links_count == 0) {
         m_average_bus_link_utilization = 0;
     } else {
