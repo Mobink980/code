@@ -35,10 +35,7 @@
 #include <iostream>
 #include <vector>
 
-// #include "mem/ruby/network/Network.hh"
-//===============================================
 #include "mem/ruby/network/Network.hh"
-//===============================================
 #include "mem/ruby/network/fault_model/FaultModel.hh"
 #include "mem/ruby/network/emerald/CommonTypes.hh"
 #include "params/EmeraldNetwork.hh"
@@ -66,10 +63,7 @@ class GridOverpass; //Network Bridge for heterogenous architectures
 class AffirmLink; //Credit Link for flow-control information
 
 //EmeraldNetwork inherites from Network (in Network.hh)
-// class EmeraldNetwork : public Network
-//==============================================
 class EmeraldNetwork : public Network
-//==============================================
 {
   public:
     typedef EmeraldNetworkParams Params;
@@ -159,7 +153,7 @@ class EmeraldNetwork : public Network
     void collateStats(); //for collating the EmeraldNetwork stats
     void regStats(); //for registering the EmeraldNetwork stats
     void resetStats(); //reset the EmeraldNetwork stats
-    //for printing a EmeraldNetwork object
+    //for printing an EmeraldNetwork object
     void print(std::ostream& out) const;
 
     // increment counters
@@ -319,7 +313,7 @@ class EmeraldNetwork : public Network
     int m_next_packet_id; // static vairable for packet id allocation
 };
 
-//for printing a EmeraldNetwork object
+//for printing an EmeraldNetwork object
 inline std::ostream&
 operator<<(std::ostream& out, const EmeraldNetwork& obj)
 {
