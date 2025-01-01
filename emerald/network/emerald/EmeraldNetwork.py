@@ -32,23 +32,16 @@ from m5.citations import add_citation
 #&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 from m5.objects.BasicRouter import (
     BasicBus,
-    BasicRouter,
+    BasicRouter
 )
 #&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 from m5.objects.ClockedObject import ClockedObject
-#from m5.objects.Network import RubyNetwork
-#============================================
 from m5.objects.Network import RubyNetwork
-#============================================
 from m5.params import *
 from m5.proxy import *
 
-
 # EmeraldNetwork inherites from RubyNetwork class (in Network.py)
-#class EmeraldNetwork(RubyNetwork):
-#============================================
 class EmeraldNetwork(RubyNetwork):
-#============================================
     type = "EmeraldNetwork"
     cxx_header = "mem/ruby/network/emerald/EmeraldNetwork.hh"
     cxx_class = "gem5::ruby::emerald::EmeraldNetwork"
@@ -71,7 +64,6 @@ class EmeraldNetwork(RubyNetwork):
         50000, "network-level deadlock threshold"
     )
 
-
 # EmeraldNetworkInterface inherites from ClockedObject
 class EmeraldNetworkInterface(ClockedObject):
     type = "EmeraldNetworkInterface"
@@ -89,7 +81,6 @@ class EmeraldNetworkInterface(ClockedObject):
         Parent.emerald_deadlock_threshold, "network-level deadlock threshold"
     )
 
-
 # EmeraldRouter inherites from BasicRouter
 class EmeraldRouter(BasicRouter):
     type = "EmeraldRouter"
@@ -105,8 +96,7 @@ class EmeraldRouter(BasicRouter):
         Parent.ni_flit_size, "bit width supported by the router"
     )
 
-
-# &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+#&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 # EmeraldBus inherites from BasicBus
 class EmeraldBus(BasicBus):
     type = "EmeraldBus"
@@ -119,7 +109,7 @@ class EmeraldBus(BasicBus):
         Parent.number_of_virtual_networks, "number of virtual networks"
     )
     width = Param.UInt32(Parent.ni_flit_size, "bit width supported by the bus")
-# &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+#&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
 
 add_citation(
