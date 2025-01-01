@@ -83,7 +83,7 @@ class InterfaceModule : public ClockedObject, public Consumer
     void addNetworkOutport(NetLink *out_link, AckLink *credit_link,
         SwitchID bus_id, uint32_t consumerVcs);
     //=====================================================
-    //====================================================
+    //=====================================================
 
     //for enqueuing a stalled message into the MessageBuffer
     //in the next cycle, after a message was dequeued this cycle
@@ -708,24 +708,22 @@ class InterfaceModule : public ClockedObject, public Consumer
     //Wakeup the NI in the next cycle to consume msgs or flits,
     //or when there's a clock period difference (to consume link flits)
     void checkReschedule();
-
     //incremet the stats within the flit
     void incrementStats(chunk *t_flit);
-
-    //incremet the stats within the flit 
-    //when came from bus and not going to be ejected
-    void incrementStatsSpecial(chunk *t_flit);
-
     //get the inport for the given vnet
     InputPort *getInportForVnet(int vnet);
     //get the outport for the given vnet
     OutputPort *getOutportForVnet(int vnet);
+
     //===================================================
     //===================================================
     //get a bus-specific inport for the given vnet
     NetworkInport *getNetworkInportForVnet(int vnet);
     //get a bus-specific outport for the given vnet
     NetworkOutport *getNetworkOutportForVnet(int vnet);
+    //incremet the stats within the flit 
+    //when came from bus and not going to be ejected
+    void incrementStatsSpecial(chunk *t_flit);
     //===================================================
     //===================================================
 };
