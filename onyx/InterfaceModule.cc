@@ -1058,6 +1058,9 @@ InterfaceModule::flitisizeMessage(MsgPtr msg_ptr, int vnet)
         //Keep track of the data traffic and control traffic
         m_net_ptr->update_traffic_distribution(route);
         int packet_id = m_net_ptr->getNextPacketID();
+
+
+      
         //if the destination layer of the message is the current layer
         if (this_layer) {
           for (int i = 0; i < num_flits; i++) {
